@@ -9,9 +9,9 @@ phases:
       - ls -ltr
       - sam build
       - ls -ltr
-  post_build:
-    commands:
-      - sam package --template-file template.yaml --s3-bucket jinmin-sam-app-2 --output-template-file packaged-template.yaml
+  # post_build:
+  #   commands:
+  #     - sam package --template-file template.yaml --s3-bucket jinmin-sam-app-2 --output-template-file packaged-template.yaml 
 artifacts:
   type: zip
   files:
