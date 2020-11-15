@@ -11,7 +11,7 @@ phases:
       - ls -ltr
   post_build:
     commands:
-      - sam package --template-file template.yaml --s3-bucket jinmin-sam-app-2 --output-template-file packaged-template.yaml --capabilities CAPABILITY_AUTO_EXPAND CAPABLITY_NAMED_IAM CAPABILITY_IAM
+      - sam package --template-file template.yaml --s3-bucket jinmin-sam-app-2 --output-template-file packaged-template.yaml 
 artifacts:
   type: zip
   files:
