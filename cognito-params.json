@@ -1,0 +1,10 @@
+[
+    {
+      "ParameterKey": "StackName",
+      "ParameterValue": "jinmin-cognito"
+    }, 
+    {
+      "ParameterKey": "CognitoAdminUser",
+      "ParameterValue": "leijinmin@gmail.com"
+    }
+  ]

@@ -1,0 +1,230 @@
+##############################################
+Description: Provide AWS Cognitio Support
+##############################################
+
+##############################################
+Transform: AWS::Serverless-2016-10-31
+##############################################
+
+##############################################
+Parameters:
+  StackName:
+    Type: String
+
+  CognitoAdminUser:
+    Type: String
+
+##############################################
+
+##############################################
+Resources:
+  ##############################################
+  # User Pool
+  UserPool:
+    Properties:
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      AutoVerifiedAttributes:
+        - email
+      Schema:
+        - Name: name
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+        - Name: email
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+      UserPoolName: !Sub ${StackName}-Pool
+    Type: AWS::Cognito::UserPool
+  UserPoolClient:
+    Properties:
+      ClientName: !Sub ${StackName}-PoolClient
+      ExplicitAuthFlows:
+        - USER_PASSWORD_AUTH
+      GenerateSecret: false
+      UserPoolId: !Ref UserPool
+    Type: AWS::Cognito::UserPoolClient
+  ##############################################
+
+  UserAdmin:
+    Properties:
+      DesiredDeliveryMediums:
+        - EMAIL
+      Username: !Sub ${CognitoAdminUser}
+      UserAttributes:
+        - Name: name
+          Value: admin
+        - Name: email
+          Value: !Sub ${CognitoAdminUser}
+        - Name: given_name
+          Value: Jinmin
+        - Name: family_name
+          Value: Lei
+      UserPoolId: !Ref UserPool
+    Type: AWS::Cognito::UserPoolUser
+  ##############################################
+
+  AdminUserGroupAttachment:
+    Type: AWS::Cognito::UserPoolUserToGroupAttachment
+    Properties:
+      GroupName: !Ref AdminGroup
+      Username: !Ref UserAdmin
+      UserPoolId: !Ref UserPool
+
+  ##############################################
+  # Identity Pool
+  IdentityPool:
+    Properties:
+      AllowUnauthenticatedIdentities: false
+      CognitoIdentityProviders:
+        - ClientId:
+            Ref: UserPoolClient
+          ProviderName: !GetAtt UserPool.ProviderName
+      IdentityPoolName: !Sub ${StackName}
+    Type: AWS::Cognito::IdentityPool
+  IdentityPoolRoles:
+    Properties:
+      IdentityPoolId: !Ref IdentityPool
+      Roles:
+        authenticated: !GetAtt AuthorizedRole.Arn
+      RoleMappings:
+        'UserPool':
+          IdentityProvider: !Join
+            - ''
+            - - !Sub 'cognito-idp.${AWS::Region}.amazonaws.com/'
+              - !Ref UserPool
+              - ':'
+              - !Ref UserPoolClient
+          AmbiguousRoleResolution: AuthenticatedRole
+          Type: Token
+    Type: AWS::Cognito::IdentityPoolRoleAttachment
+  ##############################################
+
+  ##############################################
+  # IAM Roles
+  AuthorizedRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action:
+              - sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                'cognito-identity.amazonaws.com:aud':
+                  Ref: IdentityPool
+              'ForAnyValue:StringLike':
+                'cognito-identity.amazonaws.com:amr': authenticated
+      Path: /user_management
+      Policies:
+        - PolicyName: !Sub ${StackName}-Authorized
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cognito-identity:*
+                Resource: '*'
+      RoleName: !Sub ${StackName}-Authorized
+    Type: AWS::IAM::Role
+
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: appsync.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: !Sub ${StackName}-SupplierNetworkUser
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Action:
+                  - appsync:GraphQL
+                Effect: Allow
+                Resource: '*'
+      RoleName: !Sub ${StackName}-SupplierNetworkUser
+    Type: AWS::IAM::Role
+  ##############################################
+
+  ##############################################
+  # User Pool Groups Section
+  DashboardGroup:
+    Properties:
+      GroupName: DashBoardGroup
+      RoleArn: !GetAtt AuthorizedRole.Arn
+      UserPoolId: !Ref UserPool
+    Type: AWS::Cognito::UserPoolGroup
+  ProductGroup:
+    Properties:
+      GroupName: ProductGroup
+      RoleArn: !GetAtt AuthorizedRole.Arn
+      UserPoolId: !Ref UserPool
+    Type: AWS::Cognito::UserPoolGroup
+  SalesGroup:
+    Properties:
+      GroupName: SalesGroup
+      RoleArn: !GetAtt AuthorizedRole.Arn
+      UserPoolId: !Ref UserPool
+    Type: AWS::Cognito::UserPoolGroup
+  FinanceGroup:
+    Properties:
+      GroupName: FinanceGroup
+      RoleArn: !GetAtt AuthorizedRole.Arn
+      UserPoolId: !Ref UserPool
+    Type: AWS::Cognito::UserPoolGroup
+  MarketingGroup:
+    Properties:
+      GroupName: MarketingGroup
+      RoleArn: !GetAtt AuthorizedRole.Arn
+      UserPoolId: !Ref UserPool
+    Type: AWS::Cognito::UserPoolGroup
+  CustomerSupportGroup:
+    Properties:
+      GroupName: CustomerSupportGroup
+      RoleArn: !GetAtt AuthorizedRole.Arn
+      UserPoolId: !Ref UserPool
+    Type: AWS::Cognito::UserPoolGroup
+  PublicRelationsGroup:
+    Properties:
+      GroupName: PublicRelationshipGroup
+      RoleArn: !GetAtt AuthorizedRole.Arn
+      UserPoolId: !Ref UserPool
+    Type: AWS::Cognito::UserPoolGroup
+  ITSupportGroup:
+    Properties:
+      GroupName: ITSupportGroup
+      RoleArn: !GetAtt AuthorizedRole.Arn
+      UserPoolId: !Ref UserPool
+    Type: AWS::Cognito::UserPoolGroup
+  HRGroup:
+    Properties:
+      GroupName: HRGroup
+      RoleArn: !GetAtt AuthorizedRole.Arn
+      UserPoolId: !Ref UserPool
+    Type: AWS::Cognito::UserPoolGroup
+  AdminGroup:
+    Properties:
+      GroupName: AdminGroup
+      RoleArn: !GetAtt AuthorizedRole.Arn
+      UserPoolId: !Ref UserPool
+    Type: AWS::Cognito::UserPoolGroup
+##############################################
+##############################################
+
+##############################################
+Outputs:
+  IdentityPoolId:
+    Value: !Ref IdentityPool
+  UserPoolClientId:
+    Value: !Ref UserPoolClient
+  UserPoolId:
+    Value: !Ref UserPool
+##############################################

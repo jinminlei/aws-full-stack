@@ -1,0 +1,460 @@
+##############################################
+AWSTemplateFormatVersion: '2010-09-09'
+##############################################
+
+##############################################
+Transform: AWS::Serverless-2016-10-31
+##############################################
+
+##############################################
+Description: Provide AWS App Sync Support
+##############################################
+
+##############################################
+Parameters:
+  UserPoolId:
+    Type: String
+  StackName:
+    Type: String
+  S3Bucket:
+    Type: String
+  
+##############################################
+
+##############################################
+Globals:
+  Function:
+    Environment:
+      Variables:
+        APPLICATION_BUCKET: !Ref S3Bucket
+    Handler: task.handler
+    MemorySize: 256
+    Runtime: python3.8
+    Timeout: 15
+##############################################
+
+##############################################
+Resources:
+  ##############################################
+  # Setup AppSync
+  AppSyncGraphQlApi:
+    Description: GraphQL API
+    Properties:
+      AuthenticationType: AWS_IAM
+      Name: !Sub ${StackName}-GrapQL-API
+      # XrayEnabled: !Ref EnableXray
+      AdditionalAuthenticationProviders:
+        - AuthenticationType: AMAZON_COGNITO_USER_POOLS
+          UserPoolConfig:
+            AwsRegion: us-east-1
+            UserPoolId: !Sub ${UserPoolId}
+    Type: AWS::AppSync::GraphQLApi
+  AppSyncSchema:
+    Properties:
+      ApiId: !GetAtt AppSyncGraphQlApi.ApiId
+      Definition: |
+         type Mutation {
+          updateGroupsForUser(username: String!, groups: [String!]): Groups!
+            @aws_cognito_user_pools(cognito_groups: ["UserManagementGroup"])
+          createUser(
+            username: String!,
+            email: String!,
+            family_name: String,
+            given_name: String
+          ): User!
+          deleteUser(username: String!): User
+            @aws_cognito_user_pools(cognito_groups: ["UserManagementGroup"])
+          setUserPassword(username: String!, password: String!): User
+            @aws_cognito_user_pools(cognito_groups: ["UserManagementGroup"])
+          updateUser(
+            username: String!,
+            email: String,
+            family_name: String,
+            given_name: String
+          ): User!
+          }
+          type Query {
+            getUser(username: String!): User!
+              @aws_cognito_user_pools(cognito_groups: ["UserManagementGroup"])
+            listGroups(limit: Int!, token: String): Groups!
+              @aws_cognito_user_pools(cognito_groups: ["UserManagementGroup"])
+            listUsers(limit: Int!, token: String): Users!
+              @aws_cognito_user_pools(cognito_groups: ["UserManagementGroup"])
+            listUsersInGroup(limit: Int!, token: String, groupname: String!): Users!
+              @aws_cognito_user_pools(cognito_groups: ["UserManagementGroup"])
+            listGroupsForUser(limit: Int!, token: String, username: String!): Groups!
+              @aws_cognito_user_pools(cognito_groups: ["UserManagementGroup"])
+          }
+          input GroupInput {
+            groupname: String
+          }
+          type Groups @aws_cognito_user_pools(cognito_groups: ["UserManagementGroup"]) {
+            groups: [String]
+            nextToken: String
+          }
+          input UserInput {
+            id: String!
+            username: String!
+            email: String!
+            name: String
+            groups: [GroupInput]
+          }
+          type User @aws_cognito_user_pools(cognito_groups: ["UserManagementGroup"]) {
+            id: String!
+            username: String!
+            email: String!
+            name: String
+            groups: [String]
+          }
+          type Users @aws_cognito_user_pools(cognito_groups: ["UserManagementGroup"]) {
+            users: [User]
+            nextToken: String
+          }
+    Type: AWS::AppSync::GraphQLSchema
+  ##############################################
+
+  ##############################################
+  # Aurora DataSource
+   ##############################################
+
+  ##############################################
+  UserManagementLambdaFunction:
+    Properties:
+      CodeUri: user_management
+      Environment:
+        Variables:
+          # SNS_TOPIC_ARN: !Ref QueuesAndTopicsRequestTopicArn
+          # XRAY_TRACING_SETTING: !Sub ${TracingIs}
+          USERPOOL: !Sub ${UserPoolId}
+      # Tracing: !Sub ${TracingIs}
+      Role: !GetAtt LambdaIamRole.Arn
+    Type: AWS::Serverless::Function
+  UserManagementDataSource:
+    Properties:
+      ApiId: !GetAtt AppSyncGraphQlApi.ApiId
+      Name: User_Management
+      Description: AppSync User Management Data Source
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt LambdaIamRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt UserManagementLambdaFunction.Arn
+    Type: AWS::AppSync::DataSource
+  ListGroupsResolver:
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncGraphQlApi.ApiId
+      TypeName: Query
+      FieldName: listGroups
+      DataSourceName: !GetAtt UserManagementDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "Invoke",
+          "payload": {
+            "resolver": "listGroups",
+            "arguments":  $utils.toJson($context.arguments)
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $utils.error($ctx.error.message, $ctx.error.type)
+        #end
+        $utils.toJson($context.result)
+    Type: AWS::AppSync::Resolver
+  GetUserResolver:
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncGraphQlApi.ApiId
+      TypeName: Query
+      FieldName: getUser
+      DataSourceName: !GetAtt UserManagementDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "Invoke",
+          "payload": {
+            "resolver": "getUser",
+            "arguments":  $utils.toJson($context.arguments)
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $utils.error($ctx.error.message, $ctx.error.type)
+        #end
+        $utils.toJson($context.result)
+    Type: AWS::AppSync::Resolver
+  ListGroupsResolver:
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncGraphQlApi.ApiId
+      TypeName: Query
+      FieldName: listGroups
+      DataSourceName: !GetAtt UserManagementDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "Invoke",
+          "payload": {
+            "resolver": "listGroups",
+            "arguments":  $utils.toJson($context.arguments)
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $utils.error($ctx.error.message, $ctx.error.type)
+        #end
+        $utils.toJson($context.result)
+    Type: AWS::AppSync::Resolver
+  ListUsersResolver:
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncGraphQlApi.ApiId
+      TypeName: Query
+      FieldName: listUsers
+      DataSourceName: !GetAtt UserManagementDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "Invoke",
+          "payload": {
+            "resolver": "listUsers",
+            "arguments":  $utils.toJson($context.arguments)
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $utils.error($ctx.error.message, $ctx.error.type)
+        #end
+        $utils.toJson($context.result)
+    Type: AWS::AppSync::Resolver
+  ListUsersInGroupsResolver:
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncGraphQlApi.ApiId
+      TypeName: Query
+      FieldName: listUsersInGroup
+      DataSourceName: !GetAtt UserManagementDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "Invoke",
+          "payload": {
+            "resolver": "listUsersInGroup",
+            "arguments":  $utils.toJson($context.arguments)
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $utils.error($ctx.error.message, $ctx.error.type)
+        #end
+        $utils.toJson($context.result)
+    Type: AWS::AppSync::Resolver
+  ListGroupsForUserResolver:
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncGraphQlApi.ApiId
+      TypeName: Query
+      FieldName: listGroupsForUser
+      DataSourceName: !GetAtt UserManagementDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "Invoke",
+          "payload": {
+            "resolver": "listGroupsForUser",
+            "arguments":  $utils.toJson($context.arguments)
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $utils.error($ctx.error.message, $ctx.error.type)
+        #end
+        $utils.toJson($context.result)
+    Type: AWS::AppSync::Resolver
+  UpdateGroupsForUserResolver:
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncGraphQlApi.ApiId
+      TypeName: Mutation
+      FieldName: updateGroupsForUser
+      DataSourceName: !GetAtt UserManagementDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "Invoke",
+          "payload": {
+            "resolver": "updateGroupsForUser",
+            "arguments":  $utils.toJson($context.arguments)
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $utils.error($ctx.error.message, $ctx.error.type)
+        #end
+        $utils.toJson($context.result)
+    Type: AWS::AppSync::Resolver
+  CreateUserResolver:
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncGraphQlApi.ApiId
+      TypeName: Mutation
+      FieldName: createUser
+      DataSourceName: !GetAtt UserManagementDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "Invoke",
+          "payload": {
+            "resolver": "createUser",
+            "arguments":  $utils.toJson($context.arguments)
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $utils.error($ctx.error.message, $ctx.error.type)
+        #end
+        $utils.toJson($context.result)
+    Type: AWS::AppSync::Resolver
+  DeleteUserResolver:
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncGraphQlApi.ApiId
+      TypeName: Mutation
+      FieldName: deleteUser
+      DataSourceName: !GetAtt UserManagementDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "Invoke",
+          "payload": {
+            "resolver": "deleteUser",
+            "arguments":  $utils.toJson($context.arguments)
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $utils.error($ctx.error.message, $ctx.error.type)
+        #end
+        $utils.toJson($context.result)
+    Type: AWS::AppSync::Resolver
+  SetUserPasswordResolver:
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncGraphQlApi.ApiId
+      TypeName: Mutation
+      FieldName: setUserPassword
+      DataSourceName: !GetAtt UserManagementDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "Invoke",
+          "payload": {
+            "resolver": "setUserPassword",
+            "arguments":  $utils.toJson($context.arguments)
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $utils.error($ctx.error.message, $ctx.error.type)
+        #end
+        $utils.toJson($context.result)
+    Type: AWS::AppSync::Resolver
+  UpdateUserResolver:
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncGraphQlApi.ApiId
+      TypeName: Mutation
+      FieldName: updateUser
+      DataSourceName: !GetAtt UserManagementDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2017-02-28",
+          "operation": "Invoke",
+          "payload": {
+            "resolver": "updateUser",
+            "arguments":  $utils.toJson($context.arguments)
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $utils.error($ctx.error.message, $ctx.error.type)
+        #end
+        $utils.toJson($context.result)
+    Type: AWS::AppSync::Resolver
+  ##############################################
+
+  ##############################################
+  # Aurora Lambda Data Source
+  
+
+  
+  ##############################################
+
+  ##############################################
+  # IAM Roles
+  LambdaIamRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - appsync.amazonaws.com
+                - lambda.amazonaws.com
+                - dynamodb.amazonaws.com
+                - sagemaker.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: !Sub ${StackName}-Lambda
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeSubnets
+                  - elasticache:Describe*
+                  - elasticache:List*
+                  - iam:PassRole
+                  - lambda:*
+                  - logs:*
+                  - rds-data:ExecuteStatement
+                  - rds-data:BatchExecuteStatement
+                  - rds-data:BeginTransaction
+                  - rds-data:CommitTransaction
+                  - secretsmanager:GetSecretValue
+                  - sqs:SendMessage
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sns:*
+                  - states:StartExecution
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - sagemaker:ListHumanLoops
+                  - cognito-idp:*
+                Effect: Allow
+                Resource: '*'
+      RoleName: !Sub ${StackName}
+    Type: AWS::IAM::Role
+##############################################
+
+##############################################
+Outputs:
+  ApiEndpoint:
+    Description: The URL to the AppSync GraphQL Endpoint
+    Value: !GetAtt AppSyncGraphQlApi.GraphQLUrl
+  ApiId:
+    Description: The API ID of the AppSync GraphQL API
+    Value: !GetAtt AppSyncGraphQlApi.ApiId
+  AppSyncArn:
+    Description: The Arn for the AppSync Graphql Resource
+    Value: !GetAtt AppSyncGraphQlApi.Arn
+##############################################
