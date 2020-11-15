@@ -1,0 +1,18 @@
+version: 0.2
+phases:
+  install:
+    runtime-versions:
+        python: 3.8
+  build:
+    commands:
+      - pwd
+      - ls -ltr
+      - sam build
+      - ls -ltr
+  post_build:
+    commands:
+      - sam package --template-file template.yaml --s3-bucket jinmin-sam-app-2 --output-template-file packaged-template.yaml
+artifacts:
+  type: zip
+  files:
+    - '**/*'
