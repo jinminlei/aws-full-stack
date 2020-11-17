@@ -1,0 +1,7 @@
+{
+    "Parameters": {
+      "StackName": "jinmin-sam-app-2",
+      "Stage": "dev",
+      "S3Bucket": "jinmin-sam-app-2"
+    }
+  }
