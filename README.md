@@ -1,2 +1,2 @@
 # sam-app-2
- jinmin experiments on aws
+ jinmin experiments on aws appsync/graphql, codepipeline, cognito
